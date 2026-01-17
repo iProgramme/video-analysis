@@ -1,0 +1,5 @@
+{
+  "name": "视频分析",
+  "description": "An intelligent video analysis tool that provides summaries, actionable suggestions, and interactive Q&A capabilities using Gemini 3 Pro.",
+  "requestFramePermissions": []
+}
