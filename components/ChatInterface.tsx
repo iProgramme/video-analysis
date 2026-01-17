@@ -1,68 +1,36 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
-import { Send, User, Sparkles } from 'lucide-react';
-import { Chat } from '@google/genai';
+import { Send, User, Sparkles, MessageCircleQuestion } from 'lucide-react';
 
 interface ChatInterfaceProps {
-  chatSession: Chat | null;
+  messages: ChatMessage[];
+  onSendMessage: (text: string) => void;
+  isLoading: boolean;
+  suggestions: string[];
   isEnabled: boolean;
 }
 
-export const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatSession, isEnabled }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'init',
-      role: 'model',
-      text: "我已经观看了视频。你可以问我关于具体细节、视觉元素或背景的任何问题。",
-      timestamp: new Date()
-    }
-  ]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+  messages, 
+  onSendMessage, 
+  isLoading, 
+  suggestions,
+  isEnabled 
+}) => {
+  const [input, setInput] = React.useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading, suggestions]);
 
-  const handleSend = async () => {
-    if (!input.trim() || !chatSession || loading) return;
-
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: input,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMsg]);
+  const handleSend = () => {
+    if (!input.trim() || isLoading) return;
+    onSendMessage(input);
     setInput('');
-    setLoading(true);
-
-    try {
-      const result = await chatSession.sendMessage({ message: input });
-      const responseText = result.text || "我无法生成回答。";
-      
-      const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'model',
-        text: responseText,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, aiMsg]);
-    } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'model',
-        text: "抱歉，回答时遇到了错误。",
-        timestamp: new Date()
-      }]);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -99,7 +67,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatSession, isEna
               {msg.role === 'user' ? <User size={16} /> : <Sparkles size={16} />}
             </div>
             
-            <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
               msg.role === 'user' 
                 ? 'bg-blue-600 text-white rounded-tr-none' 
                 : 'bg-slate-700 text-slate-200 rounded-tl-none'
@@ -108,7 +76,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatSession, isEna
             </div>
           </div>
         ))}
-        {loading && (
+        {isLoading && (
           <div className="flex items-start gap-3">
              <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
                <Sparkles size={16} />
@@ -124,6 +92,27 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatSession, isEna
         )}
       </div>
 
+      {/* Suggestions Area */}
+      {suggestions.length > 0 && !isLoading && (
+        <div className="px-4 py-3 bg-slate-800/50 border-t border-slate-700/50">
+          <div className="flex items-center gap-2 mb-2 text-xs text-slate-400">
+            <MessageCircleQuestion size={14} />
+            <span>你可能想问：</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((suggestion, idx) => (
+              <button
+                key={idx}
+                onClick={() => onSendMessage(suggestion)}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 hover:text-blue-300 text-slate-300 text-xs rounded-full border border-slate-600 transition-colors text-left"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-4 bg-slate-800 border-t border-slate-700">
         <div className="flex gap-2">
@@ -134,11 +123,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatSession, isEna
             onKeyDown={handleKeyDown}
             placeholder="询问关于特定时刻、物体或细节的问题..."
             className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            disabled={loading}
+            disabled={isLoading}
           />
           <button
             onClick={handleSend}
-            disabled={loading || !input.trim()}
+            disabled={isLoading || !input.trim()}
             className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 rounded-xl transition-colors flex items-center justify-center"
           >
             <Send size={20} />

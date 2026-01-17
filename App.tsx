@@ -4,11 +4,12 @@ import { AnalysisDashboard } from './components/AnalysisDashboard';
 import { ChatInterface } from './components/ChatInterface';
 import { extractFramesFromVideo } from './services/videoUtils';
 import { analyzeVideoContent, createVideoChat } from './services/geminiService';
-import { AppStatus, AnalysisResult, VideoFrame } from './types';
-import { BrainCircuit, Play, BarChart2, MessageSquare, Loader2, Sparkles } from 'lucide-react';
+import { AppStatus, AnalysisResult, VideoFrame, ChatMessage } from './types';
+import { BrainCircuit, Play, BarChart2, MessageSquare, Loader2, Sparkles, Key, Settings, ShoppingCart } from 'lucide-react';
 import { Chat } from '@google/genai';
 
 function App() {
+  const [apiKey, setApiKey] = useState(process.env.API_KEY || '');
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -18,6 +19,11 @@ function App() {
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [chatSession, setChatSession] = useState<Chat | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
 
   // Clean up object URL on unmount or file change
   useEffect(() => {
@@ -34,10 +40,18 @@ function App() {
     setChatSession(null);
     setFrames([]);
     setErrorMessage(null);
+    setChatMessages([]);
+    setChatSuggestions([]);
   };
 
   const startAnalysis = async () => {
     if (!videoFile) return;
+    
+    // Check if API key is present (either from env or input)
+    if (!apiKey.trim()) {
+      alert("请先在右上角配置 API Key");
+      return;
+    }
 
     try {
       setErrorMessage(null);
@@ -46,18 +60,27 @@ function App() {
       setStatus(AppStatus.PROCESSING_VIDEO);
       setProgress(0);
       
-      const extractedFrames = await extractFramesFromVideo(videoFile, 20, (p) => {
+      const extractedFrames = await extractFramesFromVideo(videoFile, 60, (p) => {
         setProgress(p);
       });
       setFrames(extractedFrames);
 
       // Step 2: Analyze with Gemini
       setStatus(AppStatus.ANALYZING);
-      const result = await analyzeVideoContent(extractedFrames);
+      const result = await analyzeVideoContent(extractedFrames, apiKey);
       setAnalysisResult(result);
 
-      // Step 3: Initialize Chat
-      const chat = createVideoChat(extractedFrames);
+      // Initialize Chat State with suggested questions from analysis
+      setChatMessages([{
+        id: 'init',
+        role: 'model',
+        text: "视频分析完成。我已经准备好回答你的问题了。",
+        timestamp: new Date()
+      }]);
+      setChatSuggestions(result.suggestedQuestions || []);
+
+      // Step 3: Initialize Chat Session
+      const chat = createVideoChat(extractedFrames, apiKey);
       setChatSession(chat);
 
       setStatus(AppStatus.COMPLETE);
@@ -65,6 +88,56 @@ function App() {
       console.error(error);
       setStatus(AppStatus.ERROR);
       setErrorMessage(error.message || "分析过程中发生了错误。");
+    }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    if (!chatSession) return;
+
+    const userMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: text,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, userMsg]);
+    setIsChatLoading(true);
+    setChatSuggestions([]); 
+
+    try {
+      const result = await chatSession.sendMessage({ message: text });
+      let responseText = result.text || "我无法生成回答。";
+      let newSuggestions: string[] = [];
+
+      const suggestionRegex = /<<([^>]+)>>$/;
+      const match = responseText.match(suggestionRegex);
+
+      if (match) {
+        const suggestionString = match[1];
+        newSuggestions = suggestionString.split('|').map(s => s.trim());
+        responseText = responseText.replace(suggestionRegex, '').trim();
+      }
+
+      const aiMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'model',
+        text: responseText,
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, aiMsg]);
+      setChatSuggestions(newSuggestions);
+
+    } catch (error) {
+      console.error(error);
+      setChatMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'model',
+        text: "抱歉，回答时遇到了错误。",
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsChatLoading(false);
     }
   };
 
@@ -81,8 +154,28 @@ function App() {
               VideoInsight AI
             </span>
           </div>
-          <div className="text-sm text-slate-500 font-mono">
-            由 Gemini 3 Pro 驱动
+          
+          <div className="flex items-center gap-3">
+            <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 px-3 py-1.5 gap-2 focus-within:border-blue-500 transition-colors">
+              <Key size={14} className="text-slate-400" />
+              <input 
+                type="password" 
+                placeholder="输入 API Key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="bg-transparent border-none focus:outline-none text-sm w-32 md:w-64 text-slate-200 placeholder-slate-600 font-mono"
+              />
+            </div>
+            <a 
+              href="https://guojianapi.com/" 
+              target="_blank" 
+              rel="noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
+              title="购买 API Key"
+            >
+              <ShoppingCart size={14} />
+              <span>购买 Key</span>
+            </a>
           </div>
         </div>
       </header>
@@ -106,6 +199,8 @@ function App() {
                         setVideoUrl(null);
                         setAnalysisResult(null);
                         setStatus(AppStatus.IDLE);
+                        setChatMessages([]);
+                        setChatSuggestions([]);
                     }}
                     className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-red-500/80 rounded-full text-white opacity-0 group-hover:opacity-100 transition-all text-xs"
                   >
@@ -154,7 +249,7 @@ function App() {
                 
                 {status === AppStatus.ERROR && (
                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm text-center">
-                     {errorMessage || "发生了错误。"}
+                     {errorMessage || "发生了错误。请检查您的 API Key 是否正确。"}
                      <button onClick={startAnalysis} className="block mx-auto mt-2 underline">重试</button>
                    </div>
                 )}
@@ -230,7 +325,10 @@ function App() {
                   )
                 ) : (
                   <ChatInterface 
-                    chatSession={chatSession} 
+                    messages={chatMessages}
+                    onSendMessage={handleSendMessage}
+                    isLoading={isChatLoading}
+                    suggestions={chatSuggestions}
                     isEnabled={status === AppStatus.COMPLETE} 
                   />
                 )}

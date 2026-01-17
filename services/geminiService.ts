@@ -1,19 +1,29 @@
 import { GoogleGenAI, Type, Chat } from "@google/genai";
 import { AnalysisResult, VideoFrame } from '../types';
 
-// Initialize the client
-// NOTE: We create a new instance in functions to ensure we pick up the latest API key if it changes, 
-// though typically env var is static.
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize the client with dynamic API Key and Custom Base URL
+// We allow the user to provide an API key, falling back to env var.
+const getAI = (apiKey?: string) => {
+  const finalKey = apiKey || process.env.API_KEY;
+  if (!finalKey) {
+    throw new Error("API Key is missing. Please provide it in the settings.");
+  }
+  
+  return new GoogleGenAI({ 
+    apiKey: finalKey,
+    // @ts-ignore: Applying user-requested custom configuration for proxy/base URL
+    httpOptions: { baseUrl: 'https://api.vectorengine.ai' }
+  });
+};
 
-const MODEL_NAME = 'gemini-3-pro-preview'; // Enhanced reasoning and multimodal capabilities
+const MODEL_NAME = 'gemini-3-pro-preview';
 
-export const analyzeVideoContent = async (frames: VideoFrame[]): Promise<AnalysisResult> => {
-  const ai = getAI();
+export const analyzeVideoContent = async (frames: VideoFrame[], apiKey?: string): Promise<AnalysisResult> => {
+  const ai = getAI(apiKey);
 
   // Construct parts: prompt + images
   const parts = [
-    { text: "请严格分析提供的视频帧。提供详细的视频摘要，基于内容的行动建议，识别情感倾向，并列出关键主题。请务必使用中文（简体）输出纯 JSON 格式。" },
+    { text: "请严格分析提供的视频帧。提供详细的视频摘要，基于内容的行动建议，识别情感倾向，列出关键主题，并提供3个用户可能会问的关于该视频的问题。请务必使用中文（简体）输出纯 JSON 格式。" },
     ...frames.map(f => ({
       inlineData: {
         mimeType: 'image/jpeg',
@@ -53,9 +63,14 @@ export const analyzeVideoContent = async (frames: VideoFrame[]): Promise<Analysi
             type: Type.ARRAY,
             items: { type: Type.STRING },
             description: "与视频相关的关键主题或标签（中文）。"
+          },
+          suggestedQuestions: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "3个基于视频内容的用户可能感兴趣的后续问题（中文）。"
           }
         },
-        required: ["summary", "keyTakeaways", "suggestions", "sentiment", "topics"]
+        required: ["summary", "keyTakeaways", "suggestions", "sentiment", "topics", "suggestedQuestions"]
       }
     }
   });
@@ -66,11 +81,9 @@ export const analyzeVideoContent = async (frames: VideoFrame[]): Promise<Analysi
   return JSON.parse(text) as AnalysisResult;
 };
 
-export const createVideoChat = (frames: VideoFrame[]): Chat => {
-  const ai = getAI();
+export const createVideoChat = (frames: VideoFrame[], apiKey?: string): Chat => {
+  const ai = getAI(apiKey);
   
-  // Initialize chat with the video context in history
-  // This allows the user to ask follow-up questions without re-uploading everything manually
   const history = [
     {
       role: 'user',
@@ -94,7 +107,8 @@ export const createVideoChat = (frames: VideoFrame[]): Chat => {
     model: MODEL_NAME,
     history: history,
     config: {
-      systemInstruction: "你是一个乐于助人的视频分析助手。请根据提供的视频帧回答问题。请务必使用中文（简体）回答，保持简洁和乐于助人。"
+      // Instruct the model to append suggested questions in a machine-parseable format
+      systemInstruction: "你是一个乐于助人的视频分析助手。请根据提供的视频帧回答问题。请务必使用中文（简体）回答。每次回答结束时，你**必须**基于当前对话上下文，提供3个用户可能感兴趣的追问问题。这些问题必须严格按照此格式放在回答的最后：<<问题1|问题2|问题3>>"
     }
   });
 };

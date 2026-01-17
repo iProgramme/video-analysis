@@ -9,6 +9,7 @@ export interface AnalysisResult {
   suggestions: string[];
   sentiment: 'Positive' | 'Neutral' | 'Negative' | 'Mixed';
   topics: string[];
+  suggestedQuestions: string[]; // New field for initial suggested questions
 }
 
 export interface ChatMessage {

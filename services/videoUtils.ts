@@ -3,12 +3,12 @@ import { VideoFrame } from '../types';
 /**
  * Extracts frames from a video file at regular intervals.
  * @param videoFile The video file to process
- * @param maxFrames Maximum number of frames to extract (default 20 to save payload size)
+ * @param maxFrames Maximum number of frames to extract.
  * @param onProgress Callback for progress updates (0-100)
  */
 export const extractFramesFromVideo = async (
   videoFile: File,
-  maxFrames: number = 20,
+  maxFrames: number = 60, // Increased default from 20 to 60
   onProgress?: (progress: number) => void
 ): Promise<VideoFrame[]> => {
   return new Promise((resolve, reject) => {
@@ -32,8 +32,14 @@ export const extractFramesFromVideo = async (
     // Wait for metadata to load to know duration and dimensions
     video.onloadedmetadata = async () => {
       const duration = video.duration;
-      // Calculate interval to get approx maxFrames
-      const interval = duration / maxFrames;
+      
+      // Dynamic logic: Try to get 1 frame every 2 seconds, but clamp between 20 and maxFrames.
+      // This ensures short videos get enough frames, and long videos utilize the max capacity.
+      let targetFrameCount = Math.floor(duration / 2); 
+      if (targetFrameCount < 20) targetFrameCount = 20;
+      if (targetFrameCount > maxFrames) targetFrameCount = maxFrames;
+
+      const interval = duration / targetFrameCount;
       
       canvas.width = 480; // Limit resolution for API payload efficiency
       const scale = 480 / video.videoWidth;
@@ -54,7 +60,7 @@ export const extractFramesFromVideo = async (
       };
 
       try {
-        while (currentTime < duration && processedCount < maxFrames) {
+        while (currentTime < duration && processedCount < targetFrameCount) {
           await seekResolve();
           
           // Draw frame
@@ -70,7 +76,7 @@ export const extractFramesFromVideo = async (
           currentTime += interval;
           
           if (onProgress) {
-            onProgress(Math.round((processedCount / maxFrames) * 100));
+            onProgress(Math.round((processedCount / targetFrameCount) * 100));
           }
         }
         
